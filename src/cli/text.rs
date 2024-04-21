@@ -12,6 +12,10 @@ pub enum TextSubCommand {
     Verify(TextVerifyOpts),
     #[command(about = "Generate a random blake3 key or ed25519 key pair")]
     Generate(KeyGenerateOpts),
+    #[command(about = "Encrypt a text with a key")]
+    Encrypt(CryptOpts),
+    #[command(about = "Decrypt a text with a key")]
+    Decrypt(CryptOpts),
 }
 
 #[derive(Debug, Parser)]
@@ -76,6 +80,50 @@ impl From<TextSignFormat> for &'static str {
 }
 
 impl fmt::Display for TextSignFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", Into::<&str>::into(*self))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CryptoAlgorithm {
+    Chacha20Poly1305,
+}
+
+#[derive(Debug, Parser)]
+pub struct CryptOpts {
+    #[arg(short, long, value_parser = verify_file, default_value = "-")]
+    pub input: String,
+    #[arg(short, long, value_parser = verify_file)]
+    pub key: String,
+    #[arg(long, default_value = "chacha20poly1305", value_parser = parse_crypto_algorithm)]
+    pub algo: CryptoAlgorithm,
+}
+
+fn parse_crypto_algorithm(algo: &str) -> Result<CryptoAlgorithm, anyhow::Error> {
+    algo.parse()
+}
+
+impl FromStr for CryptoAlgorithm {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "chacha20poly1305" => Ok(CryptoAlgorithm::Chacha20Poly1305),
+            v => Err(anyhow::anyhow!("Unsupported algorithm: {}", v)),
+        }
+    }
+}
+
+impl From<CryptoAlgorithm> for &'static str {
+    fn from(algo: CryptoAlgorithm) -> Self {
+        match algo {
+            CryptoAlgorithm::Chacha20Poly1305 => "chacha20poly1305",
+        }
+    }
+}
+
+impl fmt::Display for CryptoAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", Into::<&str>::into(*self))
     }

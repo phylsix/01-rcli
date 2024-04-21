@@ -6,8 +6,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use clap::Parser;
 use rcli::{
     get_content, get_reader, process_csv, process_decode, process_encode, process_genpass,
-    process_text_key_generate, process_text_sign, process_text_verify, Base64SubCommand, Opts,
-    SubCommand, TextSubCommand,
+    process_text_decrypt, process_text_encrypt, process_text_key_generate, process_text_sign,
+    process_text_verify, Base64SubCommand, Opts, SubCommand, TextSubCommand,
 };
 use zxcvbn::zxcvbn;
 
@@ -73,6 +73,18 @@ fn main() -> anyhow::Result<()> {
                 for (k, v) in key {
                     fs::write(opts.output_path.join(k), v)?;
                 }
+            }
+            TextSubCommand::Encrypt(opts) => {
+                let mut reader = get_reader(&opts.input)?;
+                let key = get_content(&opts.key)?;
+                let encrypted = process_text_encrypt(&mut reader, &key, opts.algo)?;
+                println!("\n\n{}", encrypted);
+            }
+            TextSubCommand::Decrypt(opts) => {
+                let mut reader = get_reader(&opts.input)?;
+                let key = get_content(&opts.key)?;
+                let decrypted = process_text_decrypt(&mut reader, &key, opts.algo)?;
+                println!("\n\n{}", decrypted);
             }
         },
     }

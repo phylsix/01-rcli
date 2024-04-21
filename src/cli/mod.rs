@@ -11,7 +11,7 @@ use clap::Parser;
 pub use self::{
     base64::{Base64Format, Base64SubCommand},
     csv::OutputFormat,
-    text::{TextSignFormat, TextSubCommand},
+    text::{CryptoAlgorithm, TextSignFormat, TextSubCommand},
 };
 
 #[derive(Debug, Parser)]

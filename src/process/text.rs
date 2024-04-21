@@ -1,5 +1,10 @@
-use crate::{process_genpass, TextSignFormat};
+use crate::{process_genpass, CryptoAlgorithm, TextSignFormat};
 use anyhow::Result;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use chacha20poly1305::{
+    self,
+    aead::{generic_array::GenericArray, Aead, AeadCore, KeyInit},
+};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 use std::{collections::HashMap, io::Read};
@@ -149,6 +154,86 @@ pub fn process_text_key_generate(format: TextSignFormat) -> Result<HashMap<&'sta
     }
 }
 
+pub trait Cryptor {
+    fn encrypt(&self, reader: &mut dyn Read) -> Result<String>;
+    fn decrypt(&self, reader: &mut dyn Read) -> Result<String>;
+}
+
+pub struct Chacha20Poly1305 {
+    key: [u8; 32],
+}
+
+impl Cryptor for Chacha20Poly1305 {
+    fn encrypt(&self, reader: &mut dyn Read) -> Result<String> {
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf)?;
+
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new(&self.key.into());
+
+        let nonce =
+            chacha20poly1305::ChaCha20Poly1305::generate_nonce(&mut chacha20poly1305::aead::OsRng);
+        let encoded_nonce = URL_SAFE_NO_PAD.encode(nonce);
+
+        let encrypted = cipher
+            .encrypt(&nonce, buf.as_ref())
+            .map_err(|_| anyhow::anyhow!("Failed to encrypt"))?;
+        let encoded_msg = URL_SAFE_NO_PAD.encode(encrypted);
+
+        Ok(format!("{}\n{}", encoded_nonce, encoded_msg))
+    }
+
+    fn decrypt(&self, reader: &mut dyn Read) -> Result<String> {
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf)?;
+
+        let nonce_and_msg = String::from_utf8_lossy(&buf);
+        let nonce_and_msg: Vec<&str> = nonce_and_msg.split('\n').take(2).collect();
+        let nonce = URL_SAFE_NO_PAD.decode(nonce_and_msg[0])?;
+        let decoded_msg = URL_SAFE_NO_PAD.decode(nonce_and_msg[1])?;
+
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new(&self.key.into());
+
+        let decrypted = cipher
+            .decrypt(GenericArray::from_slice(&nonce), decoded_msg.as_ref())
+            .map_err(|e| anyhow::anyhow!(format!("Failed to decrypt: {}", e)))?;
+
+        Ok(format!("{}", String::from_utf8_lossy(&decrypted)))
+    }
+}
+
+impl Chacha20Poly1305 {
+    pub fn try_new(key: &[u8]) -> Result<Self> {
+        let key = (&key[..32]).try_into()?;
+        Ok(Self::new(key))
+    }
+
+    pub fn new(key: [u8; 32]) -> Self {
+        Self { key }
+    }
+}
+
+pub fn process_text_encrypt(
+    reader: &mut dyn Read,
+    key: &[u8],
+    algo: CryptoAlgorithm,
+) -> Result<String> {
+    let cryptor = match algo {
+        CryptoAlgorithm::Chacha20Poly1305 => Box::new(Chacha20Poly1305::try_new(key)?),
+    };
+    cryptor.encrypt(reader)
+}
+
+pub fn process_text_decrypt(
+    reader: &mut dyn Read,
+    key: &[u8],
+    algo: CryptoAlgorithm,
+) -> Result<String> {
+    let cryptor = match algo {
+        CryptoAlgorithm::Chacha20Poly1305 => Box::new(Chacha20Poly1305::try_new(key)?),
+    };
+    cryptor.decrypt(reader)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +260,25 @@ mod tests {
         let sig = URL_SAFE_NO_PAD.decode(sig)?;
         let ret = process_text_verify(&mut reader, KEY, &sig, format)?;
         assert!(ret);
+        Ok(())
+    }
+
+    #[test]
+    fn test_process_text_encrypt() -> Result<()> {
+        let mut reader = "hello".as_bytes();
+        let algo = CryptoAlgorithm::Chacha20Poly1305;
+        let encrypted = process_text_encrypt(&mut reader, KEY, algo);
+        assert!(encrypted.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_process_text_decrypt() -> Result<()> {
+        let mut reader = "hello".as_bytes();
+        let algo = CryptoAlgorithm::Chacha20Poly1305;
+        let encrypted = process_text_encrypt(&mut reader, KEY, algo)?;
+        let decrypted = process_text_decrypt(&mut encrypted.as_bytes(), KEY, algo)?;
+        assert_eq!(decrypted, "hello");
         Ok(())
     }
 }
